@@ -10,27 +10,28 @@ function playerMessage(player, text) {
 }
 
 export function configMenu(player) {
+    const veinShape = player.getDynamicProperty("dorios:veinShape") ?? "Default";
+    const formattedShape = veinShape.charAt(0).toUpperCase() + veinShape.slice(1);
+
+    const playerLimit = player.getDynamicProperty("dorios:veinLimit") ?? 16;
+    const globalLimit = world.getDynamicProperty("dorios:maxVeinLimit") ?? 64;
 
     const menu = new ActionFormData()
         .title('Excavate Configuration')
         .button('Add Block', "textures/ui/realms_slot_check")
         .button('Remove Block', "textures/ui/realms_red_x")
-        .button('Shape Mode', "textures/ui/world_glyph")
-        .button('Block Limit', "textures/ui/icon_setting")
-    if (player.getDynamicProperty('dorios:veinEnabled')) {
-        menu.button('Disable Excavate', "textures/ui/toggle_on");
-    } else {
-        menu.button('Enable Excavate', "textures/ui/toggle_off");
-    }
+        .button(`Shape Mode\n§8Current: §e${formattedShape}`, "textures/ui/world_glyph")
+        .button(`Block Limit\n§8Personal: §e${playerLimit} §8/ Global: §b${globalLimit}`, "textures/ui/icon_setting");
 
-    const baseButtons = 5
+    const enabled = player.getDynamicProperty('dorios:veinEnabled');
+    const toggleLabel = enabled ? "Disable Excavate\n§a[ON]" : "Enable Excavate\n§c[OFF]";
+    const toggleIcon = enabled ? "textures/ui/toggle_on" : "textures/ui/toggle_off";
+    menu.button(toggleLabel, toggleIcon);
+
+    const baseButtons = 5;
 
     if (player.playerPermissionLevel == 2) {
-        menu.button('Set Global Block Limit', "textures/ui/Wrenches1")
-        menu.button('Add to blacklist', "textures/blocks/barrier")
-        menu.button('Remove from blacklist', "textures/ui/icon_trash")
-        menu.button('Add to Default List', "textures/ui/realms_slot_check")
-        menu.button('Remove from Default List', "textures/ui/realms_red_x")
+        menu.button('Admin Settings', "textures/ui/icon_setting");
     }
 
     menu.show(player).then(({ canceled, selection }) => {
@@ -38,15 +39,10 @@ export function configMenu(player) {
 
         switch (selection) {
             case 0:
-                playerMessage(player, '§eBreak a block to add it ')
-
-                if (!player.getDynamicProperty("dorios:isAdding")) {
-                    player.setDynamicProperty('dorios:isAdding', true)
-                } else {
-                    player.setDynamicProperty('dorios:isAdding', false)
-                }
-
+                playerMessage(player, '§eBreak a block to add it ');
+                player.setDynamicProperty('dorios:isAdding', !player.getDynamicProperty("dorios:isAdding"));
                 break;
+
             case 1:
                 let veinList;
                 try {
@@ -57,167 +53,182 @@ export function configMenu(player) {
                     veinList = list;
                 }
 
-                let removeMenu = new ActionFormData()
-                    .title('Select a block to remove')
-
-                veinList.forEach(block => {
-                    removeMenu.button({ translate: (new ItemStack(block).localizationKey) })
-                })
+                let removeMenu = new ActionFormData().title('Select a block to remove');
+                veinList.forEach(block => removeMenu.button({ translate: (new ItemStack(block).localizationKey) }));
 
                 removeMenu.show(player).then(({ canceled, selection }) => {
                     if (canceled) return;
-
-                    const selectedBlock = veinList[selection]
-
+                    const selectedBlock = veinList[selection];
                     if (selectedBlock) {
-                        veinList.splice(selection, 1)
-                        player.setDynamicProperty("dorios:veinList", JSON.stringify(veinList))
-                        playerMessage(player, '§aBlock successfully removed')
+                        veinList.splice(selection, 1);
+                        player.setDynamicProperty("dorios:veinList", JSON.stringify(veinList));
+                        playerMessage(player, '§aBlock successfully removed');
                     }
-
-                })
-
+                });
                 break;
-            case 2:
-                let shapes = new ActionFormData()
-                    .title('Vein Shapes')
 
-                Object.keys(veinHandler).forEach(name => {
-                    shapes.button(`${name}`)
-                })
+            case 2:
+                let shapes = new ActionFormData().title('Vein Shapes');
+                Object.keys(veinHandler).forEach(name => shapes.button(`${name}`));
 
                 shapes.show(player).then(({ canceled, selection }) => {
                     if (canceled) return;
-
-                    let shape = Object.keys(veinHandler)[selection]
-
-                    player.setDynamicProperty('dorios:veinShape', shape)
-                    playerMessage(player, "§aData successfully updated")
-                })
-
+                    const shape = Object.keys(veinHandler)[selection];
+                    player.setDynamicProperty('dorios:veinShape', shape);
+                    playerMessage(player, "§aData successfully updated");
+                    configMenu(player); // refresca menú
+                });
                 break;
+
             case 3:
-                let limitMenu = new ModalFormData()
+                const currentLimit = player.getDynamicProperty("dorios:veinLimit") ?? 16;
+                new ModalFormData()
                     .title('Vein Limit')
-                    .label('')
-                    .slider('Limit', 1, maxLimit)
+                    .label(`Current: ${currentLimit}`)
+                    .slider('Limit', 1, maxLimit, { defaultValue: currentLimit })
                     .show(player).then(({ canceled, formValues }) => {
                         if (canceled) return;
-
-                        let quantity = formValues[1]
-
-                        player.setDynamicProperty('dorios:veinLimit', quantity)
-                        playerMessage(player, "§aData successfully updated")
-                    })
-
+                        const quantity = formValues[1];
+                        player.setDynamicProperty('dorios:veinLimit', quantity);
+                        playerMessage(player, `§aLimit set to §e${quantity}`);
+                        configMenu(player); // refresca menú
+                    });
                 break;
+
             case 4:
-                let isEnabled = player.getDynamicProperty('dorios:veinEnabled')
-
-                player.setDynamicProperty('dorios:veinEnabled', !isEnabled)
-
-                if (isEnabled) {
-                    playerMessage(player, "§eExcavate §cDisabled")
-                } else {
-                    playerMessage(player, "§eExcavate §aEnabled")
-                }
-
+                const isEnabled = player.getDynamicProperty('dorios:veinEnabled');
+                player.setDynamicProperty('dorios:veinEnabled', !isEnabled);
+                playerMessage(player, isEnabled ? "§eExcavate §cDisabled" : "§eExcavate §aEnabled");
+                configMenu(player); // refresca
                 break;
-            // ===== Admin Options =====
-            case baseButtons + 0:
-                let maxLimitMenu = new ModalFormData()
-                    .title('Vein Limit')
-                    .label('')
-                    .textField('Max Limit', '')
+
+            case baseButtons:
+                adminMenu(player);
+                break;
+        }
+    });
+}
+
+// =============================
+// Menú de administrador
+// =============================
+function adminMenu(player) {
+    // === Valores actuales (inversos) ===
+    const noConsumeDurability = world.getDynamicProperty("dorios:noConsumeDurability") ?? false;
+    const noConsumeSaturation = world.getDynamicProperty("dorios:noConsumeSaturation") ?? false;
+    const globalLimit = world.getDynamicProperty("dorios:maxVeinLimit") ?? 64;
+
+    // === Construcción del menú ===
+    const adminMenuForm = new ActionFormData()
+        .title('Admin Settings')
+        .button(`Set Global Block Limit\n§8Current: §e${globalLimit}`, "textures/ui/Wrenches1")
+        .button('Add to Blacklist', "textures/blocks/barrier")
+        .button('Remove from Blacklist', "textures/ui/icon_trash")
+        .button('Add to Default List', "textures/ui/realms_slot_check")
+        .button('Remove from Default List', "textures/ui/realms_red_x")
+        .button(`Consume Durability\n${!noConsumeDurability ? "§a[ON]" : "§c[OFF]"}`, "textures/ui/anvil_icon")
+        .button(`Consume Saturation\n${!noConsumeSaturation ? "§a[ON]" : "§c[OFF]"}`, "textures/ui/hunger_full")
+        .button('§8Back', "textures/ui/arrow_left");
+
+    // === Mostrar el formulario ===
+    adminMenuForm.show(player).then(({ canceled, selection }) => {
+        if (canceled) return;
+
+        switch (selection) {
+            // ===== Global Limit =====
+            case 0:
+                new ModalFormData()
+                    .title('Set Global Limit')
+                    .label(`Current: ${globalLimit}`)
+                    .textField('New Limit', `${globalLimit}`)
                     .show(player).then(({ canceled, formValues }) => {
                         if (canceled) return;
 
-                        let quantity = formValues[1]
-
+                        const quantity = Number(formValues[1]);
                         if (isNaN(quantity)) {
-                            playerMessage(player, 'Number not valid')
+                            playerMessage(player, '§cNumber not valid');
                             return;
                         }
 
-                        quantity = Number(quantity)
-
-                        setMaxLimit(quantity)
-                        player.setDynamicProperty('dorios:veinLimit', quantity)
-                        playerMessage(player, "§aData successfully updated")
-                    })
-
+                        world.setDynamicProperty('dorios:maxVeinLimit', quantity);
+                        playerMessage(player, `§aGlobal Limit set to §e${quantity}`);
+                        adminMenu(player); // refrescar
+                    });
                 break;
-            case baseButtons + 1:
-                playerMessage(player, '§eBreak a block to add it ')
 
-                if (!player.getDynamicProperty("dorios:isBlacklistAdding")) {
-                    player.setDynamicProperty('dorios:isBlacklistAdding', true)
-                } else {
-                    player.setDynamicProperty('dorios:isBlacklistAdding', false)
-                }
-
+            // ===== Blacklist add =====
+            case 1:
+                playerMessage(player, '§eBreak a block to add it ');
+                player.setDynamicProperty('dorios:isBlacklistAdding', !player.getDynamicProperty("dorios:isBlacklistAdding"));
                 break;
-            case baseButtons + 2:
-                let blackListMenu = new ActionFormData()
-                    .title('Select a block to remove')
 
-                blacklist.forEach(block => {
-                    blackListMenu.button({ translate: (new ItemStack(block).localizationKey) })
-                })
+            // ===== Blacklist remove =====
+            case 2:
+                const blackListMenu = new ActionFormData().title('Select a block to remove');
+                blacklist.forEach(block => blackListMenu.button({ translate: (new ItemStack(block).localizationKey) }));
 
                 blackListMenu.show(player).then(({ canceled, selection }) => {
                     if (canceled) return;
-
-                    let selectedBlock = blacklist[selection]
-
+                    const selectedBlock = blacklist[selection];
                     if (selectedBlock) {
-                        blacklist.splice(selection, 1)
-                        world.setDynamicProperty('dorios:veinBlacklist', JSON.stringify(blacklist))
-                        playerMessage(player, '§aBlock successfully removed')
+                        blacklist.splice(selection, 1);
+                        world.setDynamicProperty('dorios:veinBlacklist', JSON.stringify(blacklist));
+                        playerMessage(player, '§aBlock successfully removed');
                     }
-
-                })
-
+                });
                 break;
-            case baseButtons + 3:
-                playerMessage(player, '§eBreak a block to add it ')
 
-                if (!player.getDynamicProperty("dorios:isDefaultAdding")) {
-                    player.setDynamicProperty('dorios:isDefaultAdding', true)
-                } else {
-                    player.setDynamicProperty('dorios:isDefaultAdding', false)
-                }
-
+            // ===== Default add =====
+            case 3:
+                playerMessage(player, '§eBreak a block to add it ');
+                player.setDynamicProperty('dorios:isDefaultAdding', !player.getDynamicProperty("dorios:isDefaultAdding"));
                 break;
-            case baseButtons + 4:
-                let defaultMenu = new ActionFormData()
-                    .title('Select a block to remove')
 
-                list.forEach(block => {
-                    defaultMenu.button({ translate: (new ItemStack(block).localizationKey) })
-                })
+            // ===== Default remove =====
+            case 4:
+                const defaultMenu = new ActionFormData().title('Select a block to remove');
+                list.forEach(block => defaultMenu.button({ translate: (new ItemStack(block).localizationKey) }));
 
                 defaultMenu.show(player).then(({ canceled, selection }) => {
                     if (canceled) return;
-
-                    let selectedBlock = list[selection]
-
+                    const selectedBlock = list[selection];
                     if (selectedBlock) {
-                        list.splice(selection, 1)
-                        world.setDynamicProperty('dorios:initialVein', JSON.stringify(list))
-                        playerMessage(player, '§aBlock successfully removed')
+                        list.splice(selection, 1);
+                        world.setDynamicProperty('dorios:initialVein', JSON.stringify(list));
+                        playerMessage(player, '§aBlock successfully removed');
                     }
-
-                })
-
+                });
                 break;
-            default:
-                console.warn("Unknown option selected.");
+
+            // ===== Consume Durability =====
+            case 5: {
+                const current = world.getDynamicProperty("dorios:noConsumeDurability") ?? false;
+                const newState = !current;
+                world.setDynamicProperty("dorios:noConsumeDurability", newState);
+                playerMessage(player, `§eConsume Durability: ${!newState ? "§aEnabled" : "§cDisabled"}`);
+                adminMenu(player); // refresca para mostrar estado actualizado
+                break;
+            }
+
+            // ===== Consume Saturation =====
+            case 6: {
+                const current = world.getDynamicProperty("dorios:noConsumeSaturation") ?? false;
+                const newState = !current;
+                world.setDynamicProperty("dorios:noConsumeSaturation", newState);
+                playerMessage(player, `§eConsume Saturation: ${!newState ? "§aEnabled" : "§cDisabled"}`);
+                adminMenu(player); // refresca
+                break;
+            }
+
+            // ===== Back =====
+            case 7:
+                configMenu(player);
                 break;
         }
-
-    })
+    });
 }
+
+
 
 world.beforeEvents.playerBreakBlock.subscribe(e => {
     const { player, block } = e

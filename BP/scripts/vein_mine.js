@@ -2,25 +2,87 @@ import { world, system } from '@minecraft/server'
 import { list, blacklist } from 'global_variables.js'
 import { is_diggable } from 'is_diggable.js'
 
+/**
+ * Breaks a block intelligently depending on its type or player tool.
+ * 
+ * Priority:
+ * 1. Checks block tags to trigger destruction script events:
+ *    - dorios:machine → dorios:destroyMachine
+ *    - dorios:generator → dorios:destroyGenerator
+ *    - dorios:fluid → dorios:destroyTank
+ * 2. Checks held item components:
+ *    - utilitycraft:hammer → dorios:hammerBlock
+ *    - utilitycraft:block_loot → dorios:blockLoot
+ * 3. Falls back to default block breaking using air replace.
+ *
+ * @param {Player} player The player breaking the block.
+ * @param {ItemStack} item The item used to break the block.
+ * @param {Block} block The targeted block.
+ */
+function breakBlock(player, item, block) {
+    if (!player || !block) return
+
+    const dim = block.dimension
+    const { x, y, z } = block.location
+    const posString = `${x},${y},${z}`
+
+    // ───── Block tags handling ─────
+    if (block.hasTag('dorios:machine')) {
+        player.runCommand(`scriptevent dorios:destroyMachine ${posString}`)
+        return
+    }
+
+    if (block.hasTag('dorios:generator')) {
+        player.runCommand(`scriptevent dorios:destroyGenerator ${posString}`)
+        return
+    }
+
+    if (block.hasTag('dorios:fluid')) {
+        player.runCommand(`scriptevent dorios:destroyTank ${posString}`)
+        return
+    }
+
+    // ───── Item component handling ─────
+    const hammerComp = item?.getComponent('utilitycraft:hammer')
+    if (hammerComp) {
+        player.runCommand(`scriptevent dorios:hammerBlock ${posString}`)
+        return
+    }
+
+    const lootComp = item?.getComponent('utilitycraft:block_loot')
+    if (lootComp) {
+        player.runCommand(`scriptevent dorios:blockLoot ${posString}`)
+        return
+    }
+
+    // ───── Default behavior ─────
+    dim.runCommand(`fill ${x} ${y} ${z} ${x} ${y} ${z} air destroy`)
+}
+
+
 function reduceHunger(player, minusHunger = 1, minusSaturation = 1) {
-    let hungerComponent = player.getComponent('player.hunger')
-    let saturationCopmonent = player.getComponent('player.saturation')
+    if (world.getDynamicProperty('dorios:noConsumeSaturation')) return true;
 
-    if (!hungerComponent || !saturationCopmonent) return false;
+    const hungerComponent = player.getComponent('minecraft:food') ?? player.getComponent('player.hunger');
+    const saturationComponent = player.getComponent('player.saturation');
 
-    let currentHunger = hungerComponent.currentValue
-    let currentSaturation = saturationCopmonent.currentValue
+    if (!hungerComponent || !saturationComponent) return false;
 
-    if (currentSaturation - 1 >= 0) {
-        saturationCopmonent.setCurrentValue(currentSaturation - minusSaturation)
+    const currentHunger = hungerComponent.currentValue;
+    const currentSaturation = saturationComponent.currentValue;
+
+    // Prioriza gastar saturación antes que hambre
+    if (currentSaturation - minusSaturation >= 0) {
+        saturationComponent.setCurrentValue(currentSaturation - minusSaturation);
         return true;
-    } else if (currentHunger - 1 >= 0) {
-        hungerComponent.setCurrentValue(currentHunger - minusHunger)
+    } else if (currentHunger - minusHunger >= 0) {
+        hungerComponent.setCurrentValue(currentHunger - minusHunger);
         return true;
     }
 
     return false;
 }
+
 
 export const veinHandler = {
     /**
@@ -147,7 +209,7 @@ export const veinHandler = {
                     // if (result.successCount > 0) {
                     //     blk.dimension.runCommand(`fill ${x} ${y} ${z} ${x} ${y} ${z} air`);
                     // }
-                    blk.dimension.runCommand(`fill ${x} ${y} ${z} ${x} ${y} ${z} air destroy`);
+                    breakBlock(player, item, blk)
                 } catch (e) {
                     console.warn(`[VeinTunnel] Error en ${x},${y},${z}:`, e);
                     return;
@@ -168,6 +230,7 @@ export const veinHandler = {
      * Vein miner shapeless (floodfill de bloques).
      */
     'shapelessVein': async function (player, block, brokenBlock, maxVein = 64, item) {
+
         const visited = new Set();
         const toCheck = [block.location];
         const dim = world.getDimension(player.dimension.id);
@@ -214,7 +277,7 @@ export const veinHandler = {
                     // if (resutl.successCount > 0) {
                     //     targetBlock.dimension.runCommand(`fill ${pos.x} ${pos.y} ${pos.z} ${pos.x} ${pos.y} ${pos.z} air`);
                     // }
-                    targetBlock.dimension.runCommand(`fill ${pos.x} ${pos.y} ${pos.z} ${pos.x} ${pos.y} ${pos.z} air destroy`);
+                    breakBlock(player, item, targetBlock)
                     await system.waitTicks(1);
                 }
 
@@ -331,7 +394,7 @@ export const veinHandler = {
 
                 try {
                     cont++;
-                    blk.dimension.runCommand(`fill ${x} ${y} ${z} ${x} ${y} ${z} air destroy`);
+                    breakBlock(player, item, blk)
                 } catch (e) {
                     console.warn(`[VeinSmallTunnel] Error en ${x},${y},${z}:`, e);
                     return;
@@ -341,92 +404,90 @@ export const veinHandler = {
             }
         }
     },
+    /**
+     * Túnel lineal 1x1 hacia adelante.
+     */
+    'lineTunnel': async function (player, brokenBlock, brokenBlockPerm, maxVein = 64, item) {
+        const maxLength = maxVein; // cada bloque equivale a 1 paso
+        const matchType = true;
+        const allowVertical = true;
 
-    // /**
-    //  * Túnel lineal 1x1 hacia adelante.
-    //  */
-    // 'lineTunnel': async function (player, brokenBlock, brokenBlockPerm, maxVein = 64, item) {
-    //     const maxLength = maxVein; // cada bloque equivale a 1 paso
-    //     const matchType = true;
-    //     const allowVertical = true;
+        const dim = world.getDimension(player.dimension.id);
+        const origin = brokenBlock.location;
 
-    //     const dim = world.getDimension(player.dimension.id);
-    //     const origin = brokenBlock.location;
+        const v = player.getViewDirection();
+        let axis, stepSign;
 
-    //     const v = player.getViewDirection();
-    //     let axis, stepSign;
+        if (!allowVertical) {
+            if (Math.abs(v.x) >= Math.abs(v.z)) {
+                axis = "x"; stepSign = v.x >= 0 ? 1 : -1;
+            } else {
+                axis = "z"; stepSign = v.z >= 0 ? 1 : -1;
+            }
+        } else {
+            if (Math.abs(v.x) >= Math.abs(v.y) && Math.abs(v.x) >= Math.abs(v.z)) {
+                axis = "x"; stepSign = v.x >= 0 ? 1 : -1;
+            } else if (Math.abs(v.z) >= Math.abs(v.y)) {
+                axis = "z"; stepSign = v.z >= 0 ? 1 : -1;
+            } else {
+                axis = "y"; stepSign = v.y >= 0 ? 1 : -1;
+            }
+        }
 
-    //     if (!allowVertical) {
-    //         if (Math.abs(v.x) >= Math.abs(v.z)) {
-    //             axis = "x"; stepSign = v.x >= 0 ? 1 : -1;
-    //         } else {
-    //             axis = "z"; stepSign = v.z >= 0 ? 1 : -1;
-    //         }
-    //     } else {
-    //         if (Math.abs(v.x) >= Math.abs(v.y) && Math.abs(v.x) >= Math.abs(v.z)) {
-    //             axis = "x"; stepSign = v.x >= 0 ? 1 : -1;
-    //         } else if (Math.abs(v.z) >= Math.abs(v.y)) {
-    //             axis = "z"; stepSign = v.z >= 0 ? 1 : -1;
-    //         } else {
-    //             axis = "y"; stepSign = v.y >= 0 ? 1 : -1;
-    //         }
-    //     }
+        function getBlock(x, y, z) {
+            try {
+                const b = dim.getBlock({ x, y, z });
+                if (!b || b.typeId === "minecraft:air") return null;
+                if (blacklist.includes(b.typeId)) return null;
+                if (matchType && b.typeId !== brokenBlockPerm) return null;
+                return b;
+            } catch {
+                return false;
+            }
+        }
 
-    //     function getBlock(x, y, z) {
-    //         try {
-    //             const b = dim.getBlock({ x, y, z });
-    //             if (!b || b.typeId === "minecraft:air") return null;
-    //             if (blacklist.includes(b.typeId)) return null;
-    //             if (matchType && b.typeId !== brokenBlockPerm) return null;
-    //             return b;
-    //         } catch {
-    //             return false;
-    //         }
-    //     }
+        let cont = 0;
+        for (let d = 0; d < maxLength; d++) {
+            let pos = { ...origin };
+            if (axis === "x") pos.x += d * stepSign;
+            if (axis === "y") pos.y += d * stepSign;
+            if (axis === "z") pos.z += d * stepSign;
 
-    //     let cont = 0;
-    //     for (let d = 0; d < maxLength; d++) {
-    //         let pos = { ...origin };
-    //         if (axis === "x") pos.x += d * stepSign;
-    //         if (axis === "y") pos.y += d * stepSign;
-    //         if (axis === "z") pos.z += d * stepSign;
+            if (item) {
+                const currentMainhand = player.getComponent("equippable").getEquipment("Mainhand");
+                if (currentMainhand?.typeId !== item.typeId) break;
+            }
 
-    //         if (item) {
-    //             const currentMainhand = player.getComponent("equippable").getEquipment("Mainhand");
-    //             if (currentMainhand?.typeId !== item.typeId) break;
-    //         }
+            const blk = getBlock(pos.x, pos.y, pos.z);
+            if (!blk) continue;
 
-    //         const blk = getBlock(pos.x, pos.y, pos.z);
-    //         if (!blk) continue;
+            if (player.getGameMode().toLowerCase() === 'survival' && item?.durability.isValidComponent()) {
+                if (item.durability.damage()) {
+                    player.getComponent('equippable').setEquipment('Mainhand', item);
+                } else {
+                    player.getComponent('equippable').setEquipment('Mainhand');
+                    player.playSound('random.break');
+                }
+            }
 
-    //         if (player.getGameMode().toLowerCase() === 'survival' && item?.durability.isValidComponent()) {
-    //             if (item.durability.damage()) {
-    //                 player.getComponent('equippable').setEquipment('Mainhand', item);
-    //             } else {
-    //                 player.getComponent('equippable').setEquipment('Mainhand');
-    //                 player.playSound('random.break');
-    //             }
-    //         }
+            if (cont % 10 === 0 && cont !== 0) {
+                if (!reduceHunger(player)) {
+                    player.addEffect('nausea', 200, { showParticles: false });
+                    break;
+                }
+            }
 
-    //         if (cont % 10 === 0 && cont !== 0) {
-    //             if (!reduceHunger(player)) {
-    //                 player.addEffect('nausea', 200, { showParticles: false });
-    //                 break;
-    //             }
-    //         }
+            try {
+                cont++;
+                breakBlock(player, item, blk)
+            } catch (e) {
+                console.warn(`[VeinLineTunnel] Error en ${pos.x},${pos.y},${pos.z}:`, e);
+                return;
+            }
 
-    //         try {
-    //             cont++;
-    //             blk.dimension.runCommand(`fill ${pos.x} ${pos.y} ${pos.z} ${pos.x} ${pos.y} ${pos.z} air destroy`);
-    //         } catch (e) {
-    //             console.warn(`[VeinLineTunnel] Error en ${pos.x},${pos.y},${pos.z}:`, e);
-    //             return;
-    //         }
-
-    //         await system.waitTicks(1);
-    //     }
-    // },
-
+            await system.waitTicks(1);
+        }
+    },
 }
 
 world.afterEvents.playerBreakBlock.subscribe(async e => {
@@ -476,8 +537,6 @@ world.afterEvents.playerBreakBlock.subscribe(async e => {
 
     if (!isEnabled || !is_diggable(itemStackBeforeBreak, brokenBlockPermutation)) return;
     if (player.getComponent('player.hunger').currentValue == 0) return;
-
-
 
     let vein = veinHandler[veinShape]
 

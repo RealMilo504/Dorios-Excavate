@@ -1,4 +1,4 @@
-import { ItemStack } from "@minecraft/server";
+import { ItemStack, world } from "@minecraft/server";
 
 /**
  * @typedef {Object} DurabilityHandler
@@ -36,6 +36,7 @@ const DurabilityHandler = {
      * @returns {boolean} True if the item broke, false otherwise.
      */
     damage(amount = 1, chance = 1) {
+        if (world.getDynamicProperty('dorios:noConsumeDurability')) return true
         if (!this.item || !this.item.getComponent("durability")) return false;
 
         const durability = this.item.getComponent("durability");
