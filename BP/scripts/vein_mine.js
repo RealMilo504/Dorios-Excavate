@@ -42,6 +42,11 @@ function breakBlock(player, item, block) {
         return
     }
 
+    if (block.hasTag('dorios:furnace')) {
+        player.runCommand(`scriptevent dorios:destroyFurnace ${posString}`)
+        return
+    }
+
     // ───── Item component handling ─────
     const hammerComp = item?.getComponent('utilitycraft:hammer')
     if (hammerComp) {
